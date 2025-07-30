@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database Container
+  postgres-db:
+    build: ./postgres
+    container_name: doorlock-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-doorlock_system}
+      POSTGRES_USER: ${POSTGRES_USER:-doorlock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doorlock_secure_2025}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+      - ./postgres/config/postgresql.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - doorlock-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-doorlock} -d ${POSTGRES_DB:-doorlock_system}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis Cache Container  
+  redis-cache:
+    image: redis:7-alpine
+    container_name: doorlock-redis
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_2025}
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - doorlock-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # FastAPI Backend Container
+  fastapi-backend:
+    build: ./backend
+    container_name: doorlock-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-doorlock}:${POSTGRES_PASSWORD:-doorlock_secure_2025}@postgres-db:5432/${POSTGRES_DB:-doorlock_system}
+      REDIS_URL: redis://redis-cache:6379/0
+      API_KEY: ${API_KEY:-kentutbau123}
+      DEBUG: ${DEBUG:-false}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    volumes:
+      - ./firmware:/app/firmware
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    networks:
+      - doorlock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Web Dashboard Container
+  web-dashboard:
+    build: ./dashboard
+    container_name: doorlock-dashboard
+    restart: unless-stopped
+    environment:
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+      REACT_APP_ENVIRONMENT: ${ENVIRONMENT:-production}
+    ports:
+      - "3000:3000"
+    depends_on:
+      fastapi-backend:
+        condition: service_healthy
+    networks:
+      - doorlock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Nginx Reverse Proxy Container
+  nginx-proxy:
+    build: ./nginx
+    container_name: doorlock-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./firmware:/var/www/firmware:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      fastapi-backend:
+        condition: service_healthy
+      web-dashboard:
+        condition: service_healthy
+    networks:
+      - doorlock-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+# Docker Networks
+networks:
+  doorlock-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Docker Volumes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local  
+  nginx_logs:
+    driver: local
