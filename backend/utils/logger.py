@@ -17,7 +17,6 @@ def setup_logging():
     # Get configuration from environment
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     debug = os.getenv("DEBUG", "false").lower() == "true"
-    log_format = os.getenv("LOG_FORMAT", "structured")
     
     # Console logging format
     if debug:
@@ -68,34 +67,15 @@ def setup_logging():
         diagnose=True
     )
     
-    # Add API access log handler
-    logger.add(
-        "/app/logs/api_access.log",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {message}",
-        filter=lambda record: record["extra"].get("log_type") == "api_access",
-        rotation="10 MB",
-        retention="7 days"
-    )
-    
-    # Configure log level
-    logger.configure(
-        handlers=[
-            {
-                "sink": sys.stdout,
-                "level": log_level
-            }
-        ]
-    )
-    
     logger.info(f"Logging configured - Level: {log_level}, Debug: {debug}")
 
 
-# Structured logging functions
+# Simple logging functions (NO DECORATORS)
 def log_api_request(method: str, path: str, client_ip: str, device_id: str = None, 
                    status_code: int = None, response_time: float = None):
     """Log API request with structured data"""
     
-    logger.bind(log_type="api_access").info(
+    logger.info(
         f"API {method} {path} - IP: {client_ip} - Device: {device_id or 'N/A'} - "
         f"Status: {status_code or 'N/A'} - Time: {response_time or 0:.3f}s"
     )
@@ -107,15 +87,7 @@ def log_device_sync(device_id: str, sync_type: str, status: str,
     
     logger.info(
         f"Device sync - ID: {device_id} - Type: {sync_type} - Status: {status} - "
-        f"Records: {records_count} - Commands: {commands_count}",
-        extra={
-            "log_type": "device_sync",
-            "device_id": device_id,
-            "sync_type": sync_type,
-            "status": status,
-            "records_count": records_count,
-            "commands_count": commands_count
-        }
+        f"Records: {records_count} - Commands: {commands_count}"
     )
 
 
@@ -131,17 +103,7 @@ def log_ota_event(device_id: str, event_type: str, firmware_version: str = None,
     if error:
         message += f" - Error: {error}"
     
-    logger.info(
-        message,
-        extra={
-            "log_type": "ota_event",
-            "device_id": device_id,
-            "event_type": event_type,
-            "firmware_version": firmware_version,
-            "progress": progress,
-            "error": error
-        }
-    )
+    logger.info(message)
 
 
 def log_security_event(event_type: str, client_ip: str, details: dict = None):
@@ -151,175 +113,25 @@ def log_security_event(event_type: str, client_ip: str, details: dict = None):
     if details:
         message += f" - Details: {details}"
     
-    logger.warning(
-        message,
-        extra={
-            "log_type": "security",
-            "event_type": event_type,
-            "client_ip": client_ip,
-            "details": details or {}
-        }
-    )
+    logger.warning(message)
 
 
-def log_database_event(operation: str, table: str, records_affected: int = None, 
-                      execution_time: float = None, error: str = None):
-    """Log database operations"""
-    
-    level = "ERROR" if error else "DEBUG"
-    message = f"Database {operation} - Table: {table}"
-    
-    if records_affected is not None:
-        message += f" - Records: {records_affected}"
-    if execution_time is not None:
-        message += f" - Time: {execution_time:.3f}s"
-    if error:
-        message += f" - Error: {error}"
-    
-    logger.log(
-        level,
-        message,
-        extra={
-            "log_type": "database",
-            "operation": operation,
-            "table": table,
-            "records_affected": records_affected,
-            "execution_time": execution_time,
-            "error": error
-        }
-    )
+# Simple performance logging function (NOT A DECORATOR)
+def log_performance_start(operation_name: str):
+    """Start performance timing"""
+    import time
+    return time.time()
 
 
-def log_cache_event(operation: str, cache_type: str, key: str = None, 
-                   hit: bool = None, execution_time: float = None):
-    """Log cache operations"""
+def log_performance_end(operation_name: str, start_time: float, success: bool = True):
+    """End performance timing and log"""
+    import time
+    execution_time = time.time() - start_time
     
-    message = f"Cache {operation} - Type: {cache_type}"
-    if key:
-        message += f" - Key: {key}"
-    if hit is not None:
-        message += f" - Hit: {hit}"
-    if execution_time is not None:
-        message += f" - Time: {execution_time:.3f}s"
-    
-    logger.debug(
-        message,
-        extra={
-            "log_type": "cache",
-            "operation": operation,
-            "cache_type": cache_type,
-            "key": key,
-            "hit": hit,
-            "execution_time": execution_time
-        }
-    )
-
-
-# Performance monitoring decorator
-def log_performance(operation_name: str):
-    """Decorator to log function performance"""
-    
-    def decorator(func):
-        import asyncio
-        import time
-        from functools import wraps
-        
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            start_time = time.time()
-            try:
-                result = await func(*args, **kwargs)
-                execution_time = time.time() - start_time
-                
-                logger.debug(
-                    f"Performance - {operation_name} completed in {execution_time:.3f}s",
-                    extra={
-                        "log_type": "performance",
-                        "operation": operation_name,
-                        "execution_time": execution_time,
-                        "status": "success"
-                    }
-                )
-                return result
-                
-            except Exception as e:
-                execution_time = time.time() - start_time
-                
-                logger.error(
-                    f"Performance - {operation_name} failed after {execution_time:.3f}s: {e}",
-                    extra={
-                        "log_type": "performance", 
-                        "operation": operation_name,
-                        "execution_time": execution_time,
-                        "status": "error",
-                        "error": str(e)
-                    }
-                )
-                raise
-        
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            start_time = time.time()
-            try:
-                result = func(*args, **kwargs)
-                execution_time = time.time() - start_time
-                
-                logger.debug(
-                    f"Performance - {operation_name} completed in {execution_time:.3f}s",
-                    extra={
-                        "log_type": "performance",
-                        "operation": operation_name,
-                        "execution_time": execution_time,
-                        "status": "success"
-                    }
-                )
-                return result
-                
-            except Exception as e:
-                execution_time = time.time() - start_time
-                
-                logger.error(
-                    f"Performance - {operation_name} failed after {execution_time:.3f}s: {e}",
-                    extra={
-                        "log_type": "performance",
-                        "operation": operation_name,
-                        "execution_time": execution_time,
-                        "status": "error",
-                        "error": str(e)
-                    }
-                )
-                raise
-        
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        else:
-            return sync_wrapper
-    
-    return decorator
-
-
-# Log filtering utilities
-class LogFilter:
-    """Utilities for filtering and analyzing logs"""
-    
-    @staticmethod
-    def get_device_logs(device_id: str, hours: int = 24):
-        """Get logs for specific device (placeholder - implement with log aggregation)"""
-        # This would typically integrate with a log aggregation system
-        # For now, return placeholder
-        return {
-            "device_id": device_id,
-            "hours": hours,
-            "message": "Log filtering not implemented - use external log aggregation"
-        }
-    
-    @staticmethod
-    def get_error_summary(hours: int = 1):
-        """Get error summary (placeholder - implement with log aggregation)"""
-        return {
-            "hours": hours,
-            "message": "Error summary not implemented - use external log aggregation"
-        }
+    if success:
+        logger.debug(f"Performance - {operation_name} completed in {execution_time:.3f}s")
+    else:
+        logger.error(f"Performance - {operation_name} failed after {execution_time:.3f}s")
 
 
 # Configuration

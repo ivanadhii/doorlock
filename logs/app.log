@@ -1,0 +1,4 @@
+2025-07-30 14:59:21.619 | INFO     | __main__:main:648 - Starting Ultra Clean Doorlock API
+2025-07-30 14:59:21.655 | INFO     | main:startup:636 - 🚀 Ultra Clean Doorlock API Started
+2025-07-30 15:09:00.904 | INFO     | main:bulk_upload:198 - 📤 Sync: doorlock_clean_001
+2025-07-30 15:09:00.911 | INFO     | main:bulk_upload:308 - ✅ Sync complete: doorlock_clean_001 - 0 logs, 0 commands
